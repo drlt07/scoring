@@ -1,0 +1,149 @@
+WEB APP CHẤM ĐIỂM FANROC – BẢNG R (ROBOTICS)
+1. MỤC TIÊU HỆ THỐNG
+Hãy thiết kế và xây dựng một WEB APP CHẤM ĐIỂM cho cuộc thi FANROC – Bảng R (Robotics), phục vụ sử dụng trực tiếp trong ngày thi, đảm bảo:
+Ổn định
+Dễ dùng
+Cập nhật điểm theo thời gian thực
+Phù hợp cho Ban giám khảo sử dụng điện thoại
+2. MÔI TRƯỜNG & TRIỂN KHAI
+Ứng dụng chạy hoàn toàn trên trình duyệt (Web App)
+Ban giám khảo (BGK) dùng điện thoại để chấm
+Không cần app native (Android / iOS)
+Có thể triển khai online, gắn tên miền riêng
+Dữ liệu cập nhật real-time cho tất cả thiết bị đang mở
+3. CÔNG NGHỆ BẮT BUỘC
+Responsive, ưu tiên mobile-first
+Frontend & Backend: NodeJS (sử dụng cùng project)
+Database: MySQL
+4. ĐĂNG NHẬP & PHÂN QUYỀN
+Hệ thống có 3 vai trò người dùng, phân quyền rõ ràng:
+4.1 ADMIN (Ban tổ chức)
+Đăng nhập quản trị
+Tạo, sửa, xóa đội thi (mã đội, tên đội, trường)
+Cấu hình cuộc thi:
+Số đội / liên minh
+Số sân
+Thời gian bắt đầu
+Thời lượng mỗi trận
+Random đội thi
+Tạo & quản lý lịch thi đấu
+Duyệt, chỉnh sửa, khóa điểm
+Xem & xuất bảng xếp hạng
+Xuất dữ liệu ra Excel
+4.2 GIÁM KHẢO (BGK)
+Đăng nhập trên điện thoại
+Chỉ xem các trận đang thi
+Chỉ được nhập điểm
+Không được sửa luật
+Không được sửa điểm sau khi đã gửi
+4.3 VIEWER (Màn hình lớn)
+Đăng nhập bằng mã xem
+Chỉ xem:
+Điểm real-time
+Bảng xếp hạng
+Không chỉnh sửa dữ liệu
+5. QUẢN LÝ & RANDOM ĐỘI THI
+Admin nhập danh sách đội gồm:
+Mã đội (ID – dùng nội bộ)
+Tên đội (hiển thị cho người dùng)
+Trường
+Logic RANDOM:
+Trộn ngẫu nhiên danh sách đội
+Trong cùng 1 khung giờ:
+Không trùng đội
+Mỗi trận:
+2 liên minh: ĐỎ và XANH
+Mỗi liên minh gồm 2 đội
+Không trùng đội trong cùng trận
+Đặc biệt:
+Các đội thuộc THCS Hữu Bằng không được ghép cùng 1 liên minh
+Hiển thị rõ kết quả random:
+Tên đội + trường (KHÔNG hiển thị mã đội)
+Có nút:
+Xác nhận lịch
+In / xuất danh sách thi đấu
+6. GIAO DIỆN CHẤM ĐIỂM (TỐI ƯU MOBILE)
+Thiết kế mobile-first, dùng cho BGK:
+Bố cục:
+Chia làm 2 cột:
+Liên minh ĐỎ
+Liên minh XANH
+Mỗi liên minh có:
+Số bóng vàng robot đưa vào hệ sinh thái
+Số bóng trắng human player đưa vào hệ sinh thái
+Checkbox:
+Đã đẩy rào cản hay chưa
+Số bóng trong:
+Trụ hệ sinh thái của liên minh mình
+Trụ hệ sinh thái của đối thủ
+End Game cho từng robot:
+Không vào vùng xanh
+Partially In
+Fully In
+Số lỗi penalty
+Thẻ:
+Không thẻ
+Thẻ vàng
+Thẻ đỏ
+Nút chức năng:
+TÍNH ĐIỂM
+GỬI ĐIỂM
+7. LUẬT TÍNH ĐIỂM (PHẢI ÁP DỤNG ĐÚNG)
+7.1 Điểm sinh học
+Bóng vàng: 3 điểm / quả
+Bóng trắng: 1 điểm / quả
+7.2 Rào cản
+Đẩy được rào cản: +10 điểm
+Không đẩy được:
+Trừ 0.2 vào hệ số cân bằng
+7.3 Hệ số cân bằng (so sánh số bóng giữa 2 trụ)
+Lệch 0–1 bóng: x2.0
+Lệch 2–3 bóng: x1.5
+Lệch ≥ 4 bóng: x1.3
+7.4 End Game
+Robot Partially In: +5 điểm
+Robot Fully In: +10 điểm
+Nếu cả 2 robot cùng Fully In: +10 điểm bonus
+7.5 Penalty
+Mỗi lỗi: -5 điểm
+Thẻ vàng: -10 điểm
+Thẻ đỏ:
+Liên minh đó 0 điểm toàn trận
+7.6 Công thức tổng điểm
+(Tổng điểm sinh học + điểm rào cản)
+× (hệ số cân bằng - 0.2 nếu chưa đẩy rào cản)
++ điểm End Game
+- penalty
+8. REAL-TIME & QUY TRÌNH
+BGK nhập điểm → bấm GỬI ĐIỂM
+Dữ liệu lưu vào Firebase
+Tất cả thiết bị (Admin, BGK khác, Viewer):
+Cập nhật NGAY LẬP TỨC
+Trận có trạng thái:
+Đang thi
+Chờ duyệt
+Đã khóa
+9. BẢNG XẾP HẠNG
+Mỗi đội thi đấu 4 trận
+Điểm xếp hạng:
+Tổng điểm của 4 trận cao nhất
+Nếu bằng điểm:
+So sánh điểm trận cao nhất
+So sánh tổng điểm sinh học
+Hiển thị:
+Tên đội
+Trường
+KHÔNG hiển thị mã đội
+Có thể xuất Excel
+10. YÊU CẦU CUỐI
+Code rõ ràng, dễ chỉnh sửa
+Có ví dụ:
+Logic random đội
+Tính điểm
+Có hướng dẫn:
+Deploy
+Gắn tên miền riêng
+Ưu tiên:
+Ổn định
+Đơn giản
+Dùng tốt trong ngày thi
