@@ -113,7 +113,8 @@ function generateRandomMatchSlots(teams) {
   // ── Thử nhiều lần (ưu tiên 4 trận/đội, không thi 2 trận liên tiếp) ──
   const MAX_ATTEMPTS = 500;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const result = tryGenerate(teamIds, REQUIRED_MATCHES, canBeAlliance);
+    // Truyền BẢN SAO để tránh mutate teamIds gốc giữa các attempt
+    const result = tryGenerate([...teamIds], REQUIRED_MATCHES, canBeAlliance);
     if (result) {
       const total = result.reduce((s, slot) => s + slot.length, 0);
       console.log(`  [Schedule] Thành công ở lần thử #${attempt + 1}: ${total} trận, ${result.length} khung xếp (sẽ ánh xạ tuần tự 1 trận/mốc thời gian)`);
@@ -121,22 +122,9 @@ function generateRandomMatchSlots(teams) {
     }
   }
 
-  // ── LAST RESORT: Cho phép một phần nhỏ đội thi 5 trận ──
-  // Vẫn đảm bảo: tất cả đội có ÍT NHẤT 4 trận, tối đa 5 trận, chênh lệch ≤ 1.
-  const maxFiveMatchTeams = Math.max(4, Math.floor(n * 0.2)); // tối đa ~20% đội được 5 trận
-  console.log(`  [Schedule] Thử chế độ bất đắc dĩ: cho phép tối đa ${maxFiveMatchTeams} đội thi 5 trận.`);
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const result = tryGenerateAllowingFive(teamIds, REQUIRED_MATCHES, canBeAlliance, maxFiveMatchTeams);
-    if (result) {
-      const total = result.reduce((s, slot) => s + slot.length, 0);
-      console.log(`  [Schedule] Thành công với chế độ 5 trận ở lần thử #${attempt + 1}: ${total} trận`);
-      return result;
-    }
-  }
-
   throw new Error(
-    `Không thể tạo lịch hợp lệ sau ${MAX_ATTEMPTS} lần thử (kể cả chế độ cho phép một số đội 5 trận). ` +
-    `Kiểm tra lại số lượng đội (${n}) và số lượt/đội (4).`
+    `Không thể tạo lịch hợp lệ sau ${MAX_ATTEMPTS} lần thử với điều kiện MỖI ĐỘI ĐÚNG 4 TRẬN ` +
+    `và không thi 2 trận liên tiếp. Kiểm tra lại số lượng đội (${n}) và số lượt/đội (4).`
   );
 }
 
@@ -147,8 +135,12 @@ function generateRandomMatchSlots(teams) {
  *  - Sân quay vòng 1 → 2 → 3 → ...
  * Đồng thời cố gắng: mỗi đội được NGHỈ ít nhất 1 trận giữa 2 lần thi
  * (không chơi ở 2 "khung xếp" liên tiếp; khi flatten sẽ tương đương không chơi 2 trận liên tiếp).
+ *
+ * LƯU Ý: Không mutate mảng teamIds gốc bên ngoài (dễ gây lệch fairness giữa các attempt),
+ * nên clone sang localTeamIds cho toàn bộ logic bên trong.
  */
-function tryGenerate(teamIds, requiredMatches, canBeAlliance) {
+function tryGenerate(inputTeamIds, requiredMatches, canBeAlliance) {
+  const teamIds = [...inputTeamIds];
   const n = teamIds.length;
   const matchCount = {};
   teamIds.forEach(id => { matchCount[id] = 0; });
@@ -207,6 +199,9 @@ function tryGenerate(teamIds, requiredMatches, canBeAlliance) {
       allTeams.forEach(id => { lastSlotPlayed[id] = slotIdx; });
     }
 
+    // Sau khi commit, ưu tiên các đội đang có ít trận hơn cho lần chọn tiếp theo
+    teamIds.sort((a, b) => matchCount[a] - matchCount[b] || a.localeCompare(b));
+
     timeSlots.push(slotMatches);
     matchesCreated += slotMatches.length;
     consecutiveFails = 0;
@@ -224,8 +219,11 @@ function tryGenerate(teamIds, requiredMatches, canBeAlliance) {
 /**
  * Last-resort: Cho phép tối đa `maxFiveMatchTeams` đội thi 5 trận
  * để phá kẹt lịch nhưng vẫn giữ chênh lệch số trận tối đa = 1.
+ *
+ * Giống tryGenerate: luôn CLONE đầu vào để không mutate mảng gốc.
  */
-function tryGenerateAllowingFive(teamIds, requiredMatches, canBeAlliance, maxFiveMatchTeams) {
+function tryGenerateAllowingFive(inputTeamIds, requiredMatches, canBeAlliance, maxFiveMatchTeams) {
+  const teamIds = [...inputTeamIds];
   const matchCount = {};
   teamIds.forEach(id => { matchCount[id] = 0; });
 
@@ -286,11 +284,17 @@ function tryGenerateAllowingFive(teamIds, requiredMatches, canBeAlliance, maxFiv
     const slotMatches = tryFillTimeSlot(pool, target, matchCount, canBeAlliance, pairCount, pairKey);
     if (!slotMatches || slotMatches.length === 0) continue;
 
-    // Ghi nhận trận
+    // Ghi nhận trận – kiểm soát QUOTA cứng: không đội nào vượt quá requiredMatches + 1
     for (const match of slotMatches) {
       const all4 = [...match.allianceRed.teams, ...match.allianceBlue.teams];
       for (const tid of all4) {
-        matchCount[tid] = (matchCount[tid] || 0) + 1;
+        const next = (matchCount[tid] || 0) + 1;
+        // Nếu bất kỳ đội nào bị vượt quota (ví dụ 6+ trận khi requiredMatches = 4)
+        // thì lịch này coi như không hợp lệ → trả null để generate lại từ đầu.
+        if (next > requiredMatches + 1) {
+          return null;
+        }
+        matchCount[tid] = next;
       }
       for (let i = 0; i < all4.length; i++) {
         for (let j = i + 1; j < all4.length; j++) {
@@ -317,6 +321,7 @@ function tryFillTimeSlot(eligible, target, matchCount, canBeAlliance, pairCount,
   if (eligible.length < needed) return null;
 
   const SLOT_ATTEMPTS = 60;
+  const MAX_MATCHES = 4;
 
   for (let sa = 0; sa < SLOT_ATTEMPTS; sa++) {
     // Nhóm theo matchCount, shuffle trong nhóm, ưu tiên ít trận nhất
@@ -330,11 +335,25 @@ function tryFillTimeSlot(eligible, target, matchCount, canBeAlliance, pairCount,
     const ordered = [];
     const sortedKeys = Object.keys(grouped).map(Number).sort((a, b) => a - b);
     for (const mc of sortedKeys) {
-      ordered.push(...shuffleArray(grouped[mc]));
+      // Light shuffle: giữ ưu tiên fairness nhưng vẫn có chút ngẫu nhiên
+      const g = grouped[mc];
+      for (let i = g.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * Math.min(3, i + 1));
+        [g[i], g[j]] = [g[j], g[i]];
+      }
+      ordered.push(...g);
     }
 
-    // Lấy `needed` đội (ưu tiên ít trận nhất)
-    const pool = ordered.slice(0, needed);
+    // Lấy `needed` đội (ưu tiên ít trận nhất) với kiểm tra quota và không trùng trong pool
+    const pool = [];
+    const chosen = new Set();
+    for (const id of ordered) {
+      if (matchCount[id] >= MAX_MATCHES) continue;
+      if (chosen.has(id)) continue;
+      chosen.add(id);
+      pool.push(id);
+      if (pool.length === needed) break;
+    }
     if (pool.length < needed) continue;
 
     // Shuffle pool rồi chia thành các nhóm 4
@@ -348,6 +367,11 @@ function tryFillTimeSlot(eligible, target, matchCount, canBeAlliance, pairCount,
 
       const match = bestSplit(four, canBeAlliance, pairCount, pairKey);
       if (!match) { ok = false; break; }
+
+      // Đảm bảo trong 1 match không có đội trùng
+      const allTeams = [...match.allianceRed.teams, ...match.allianceBlue.teams];
+      const set = new Set(allTeams);
+      if (set.size !== 4) { ok = false; break; }
 
       matches.push(match);
     }
@@ -391,9 +415,25 @@ function bestSplit(four, canBeAlliance, pairCount, pairKey) {
     if (!canBeAlliance(sp.red[0], sp.red[1])) continue;
     if (!canBeAlliance(sp.blue[0], sp.blue[1])) continue;
 
-    // Điểm = tổng pairCount (càng thấp càng đa dạng)
-    let score = 0;
     const all = [...sp.red, ...sp.blue];
+
+    // HARD CONSTRAINT: Không cho phép bất kỳ cặp đội nào gặp nhau ≥ 3 lần
+    // (pairCount >= 2 → trận này sẽ là lần thứ 3 trở lên) để hạn chế lặp lại.
+    let tooManyRepeats = false;
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const k = pairKey(all[i], all[j]);
+        if ((pairCount[k] || 0) >= 2) {
+          tooManyRepeats = true;
+          break;
+        }
+      }
+      if (tooManyRepeats) break;
+    }
+    if (tooManyRepeats) continue;
+
+    // Điểm = tổng pairCount (càng thấp càng đa dạng) – sau khi đã loại các cặp có nguy cơ lặp ≥ 3
+    let score = 0;
     for (let i = 0; i < all.length; i++) {
       for (let j = i + 1; j < all.length; j++) {
         score += pairCount[pairKey(all[i], all[j])] || 0;
@@ -603,7 +643,10 @@ router.get('/export-schedule-excel', async (req, res) => {
       'Tên đội': d.teamName,
       'Trường': d.school,
       'isStrong': d.isStrong ? 'Có' : 'Không',
-      'Số trận': d.matchCount,
+    // Số trận theo lịch – tổng số trận đội này đã thi
+    'Số trận': d.matchCount,
+    // Thêm cột rõ ràng hơn để tiện quan sát / lọc trong Excel (same value)
+    'Số trận đã thi': d.matchCount,
       'Đồng đội đã gặp': d.uniqueAllies,
       'Đối thủ đã gặp': d.uniqueOpponents,
     }));
@@ -747,10 +790,10 @@ router.post('/manual-add', async (req, res) => {
       return normalizeText(schoolOf(a)) && normalizeText(schoolOf(a)) === normalizeText(schoolOf(b));
     }
     function isHB(id) {
-      return normalizeText(schoolOf(id)).includes('thcs huu bang');
+      return normalizeText(schoolOf(id)).includes('thcs hữu bằng');
     }
     function isNTL(id) {
-      return normalizeText(schoolOf(id)).includes('thcs nam tu liem');
+      return normalizeText(schoolOf(id)).includes('thcs nam từ liêm');
     }
 
     const [r1, r2] = newMatch.allianceRed.teams;
@@ -968,10 +1011,135 @@ router.delete('/', async (req, res) => {
 });
 
 // DELETE /api/matches/:id – Xóa 1 trận riêng lẻ
+// YÊU CẦU:
+//  - Có thể xóa riêng từng match.
+//  - Sau khi xóa:
+//      + Tự động cập nhật lại thứ tự trận (match_number liên tục 1,2,3,...).
+//      + Cập nhật lại thời gian các trận phía sau: trận sau bắt đầu ngay khi trận trước kết thúc.
+//      + Sân thi đấu vẫn quay vòng 1 → 2 → 3 → 1 → ...
+//  - KHÔNG "regenerate" lại toàn bộ lịch: giữ nguyên đội, kết quả và trạng thái trận, chỉ cập nhật metadata (match_number, field, start/end time).
 router.delete('/:id', async (req, res) => {
   try {
     const pool = getPool();
-    await pool.query('DELETE FROM `matches` WHERE id = ?', [req.params.id]);
+    const id = req.params.id;
+
+    // Lấy toàn bộ lịch hiện tại (theo match_number) để biết thứ tự trước/sau
+    const [allRows] = await pool.query('SELECT * FROM `matches` ORDER BY match_number');
+    const indexToDelete = allRows.findIndex((r) => r.id === id);
+    if (indexToDelete === -1) {
+      return res.status(404).json({ error: 'Không tìm thấy trận để xóa.' });
+    }
+
+    // Xóa trận được chọn
+    await pool.query('DELETE FROM `matches` WHERE id = ?', [id]);
+
+    // Lấy lại danh sách sau khi xóa
+    const [remainingRows] = await pool.query('SELECT * FROM `matches` ORDER BY match_number');
+
+    // Nếu không còn trận nào thì chỉ cần emit cập nhật là đủ
+    if (!remainingRows || remainingRows.length === 0) {
+      req.app.get('io').emit('matches:update');
+      return res.json({ success: true });
+    }
+    // Chuyển sang dạng JSON chuẩn để dễ xử lý
+    const remainingMatches = remainingRows.map(rowToMatch).sort(
+      (a, b) => a.matchNumber - b.matchNumber
+    );
+
+    // ── AUTO-FIX: tránh đội thi 2 trận LIỀN NHAU bằng cách hoán đổi cục bộ ──
+    // Quy tắc: chỉ đổi VỊ TRÍ trận trong timeline, không đổi đội/điểm/trạng thái bên trong trận.
+    function getMatchTeams(match) {
+      return [...match.allianceRed.teams, ...match.allianceBlue.teams];
+    }
+
+    function fixConsecutiveTeamConflicts(matches) {
+      const LOOKAHEAD = 10; // giới hạn tầm nhìn để vẫn O(n)
+      for (let i = 1; i < matches.length; i++) {
+        const prevTeams = new Set(getMatchTeams(matches[i - 1]));
+        const currTeams = getMatchTeams(matches[i]);
+
+        let conflict = false;
+        for (const tid of currTeams) {
+          if (prevTeams.has(tid)) {
+            conflict = true;
+            break;
+          }
+        }
+        if (!conflict) continue;
+
+        // Tìm trận gần phía sau để hoán đổi sao cho không trùng đội với trận trước
+        let swapped = false;
+        for (let j = i + 1; j < matches.length && j <= i + LOOKAHEAD; j++) {
+          const candTeams = getMatchTeams(matches[j]);
+          let ok = true;
+          for (const tid of candTeams) {
+            if (prevTeams.has(tid)) {
+              ok = false;
+              break;
+            }
+          }
+          if (!ok) continue;
+
+          const tmp = matches[i];
+          matches[i] = matches[j];
+          matches[j] = tmp;
+          swapped = true;
+          break;
+        }
+
+        // Nếu không tìm được ứng viên phù hợp trong LOOKAHEAD, tạm chấp nhận xung đột hiếm gặp.
+        if (!swapped) {
+          continue;
+        }
+      }
+    }
+
+    fixConsecutiveTeamConflicts(remainingMatches);
+
+    // Helper: HH:MM -> minutes
+    const toMinutes = (timeStr) => {
+      const [h, m] = String(timeStr || '08:00').split(':').map(Number);
+      const hh = isNaN(h) ? 8 : h;
+      const mm = isNaN(m) ? 0 : m;
+      return hh * 60 + mm;
+    };
+
+    // Helper: minutes -> HH:MM
+    const toTime = (min) =>
+      `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+
+    // Ghi nhận thời lượng gốc của từng trận để giữ nguyên "độ dài" khi dồn lịch
+    const originalDurations = remainingMatches.map((m) => {
+      const s = toMinutes(m.startTime);
+      const e = toMinutes(m.endTime || m.startTime);
+      const d = Math.max(1, e - s);
+      return d || 5;
+    });
+
+    // Thời gian bắt đầu của toàn bộ lịch giữ nguyên như trận đầu tiên hiện tại
+    const firstStartMinutes = toMinutes(remainingMatches[0].startTime);
+    let cursor = firstStartMinutes;
+
+    const fieldCycle = [1, 2, 3];
+
+    // Dồn lại lịch: re-number + re-time + re-field tuần tự
+    for (let i = 0; i < remainingMatches.length; i++) {
+      const m = remainingMatches[i];
+      const duration = originalDurations[i];
+
+      const newMatchNumber = i + 1;
+      const newStart = cursor;
+      const newEnd = cursor + duration;
+      const newField = fieldCycle[i % fieldCycle.length];
+
+      cursor = newEnd;
+
+      await pool.query(
+        'UPDATE `matches` SET match_number = ?, field = ?, start_time = ?, end_time = ? WHERE id = ?',
+        [newMatchNumber, newField, toTime(newStart), toTime(newEnd), m.id]
+      );
+    }
+
     req.app.get('io').emit('matches:update');
     res.json({ success: true });
   } catch (err) {

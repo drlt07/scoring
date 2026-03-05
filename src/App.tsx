@@ -113,6 +113,9 @@ const App: React.FC = () => {
 
   // ── Leaderboard ──────────────────────────────
   const leaderboard = useMemo(() => {
+    // Đảm bảo luôn tính toán lại khi teams hoặc matches thay đổi
+    if (!teams || teams.length === 0) return [];
+    
     const stats = teams.map(team => {
       const teamMatches = matches.filter(
         m =>
@@ -141,11 +144,14 @@ const App: React.FC = () => {
         matchesPlayed: matchScores.length,
       };
     });
+    
+    // Sắp xếp: đội có điểm cao hơn lên trước, nếu bằng nhau thì ưu tiên đội có điểm cao nhất cao hơn
     return stats.sort(
       (a, b) =>
         (b.totalPoints ?? 0) - (a.totalPoints ?? 0) ||
         (b.highestMatchScore ?? 0) - (a.highestMatchScore ?? 0) ||
-        (b.bioPointsTotal ?? 0) - (a.bioPointsTotal ?? 0)
+        (b.bioPointsTotal ?? 0) - (a.bioPointsTotal ?? 0) ||
+        (a.stt ?? 0) - (b.stt ?? 0) // Nếu tất cả bằng nhau, ưu tiên STT nhỏ hơn
     );
   }, [teams, matches]);
 
@@ -540,7 +546,7 @@ const App: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {leaderboard.slice(0, 10).map((t, idx) => (
+                    {leaderboard.map((t, idx) => (
                       <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="px-8 py-6 font-black text-slate-300 italic">#{idx + 1}</td>
                         <td className="px-8 py-6"><p className="font-black text-slate-800">{t.name}</p><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">{t.school}</p></td>
@@ -846,7 +852,7 @@ const App: React.FC = () => {
                     Chỉnh sửa trận #{editingMatch.matchNumber} – Sân {editingMatch.field}
                   </h3>
                   <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.25em] mb-6">
-                    Thay đổi đội trong liên minh, hoán đổi liên minh. Hệ thống sẽ tự kiểm tra cooldown, số trận và ràng buộc trường.
+          
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-3">
