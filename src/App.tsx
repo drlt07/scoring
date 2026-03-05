@@ -157,16 +157,44 @@ const App: React.FC = () => {
 
   // ── Export Excel ─────────────────────────────
   const exportLeaderboardToExcel = () => {
-    const data = leaderboard.map((team, index) => ({
-      'Hạng': index + 1,
-      'STT': team.stt,
-      'Tên đội': team.name,
-      'Trường': team.school,
-      'Số trận': team.matchesPlayed,
-      'Tổng điểm (Top 4)': team.totalPoints,
-      'Điểm cao nhất': team.highestMatchScore,
-      'Điểm sinh học': team.bioPointsTotal,
-    }));
+    const data = leaderboard.map((team, index) => {
+      // Lấy danh sách tất cả trận hợp lệ của đội (LOCKED hoặc PENDING)
+      const teamMatches = matches.filter(m =>
+        (m.status === 'LOCKED' || m.status === 'PENDING') &&
+        (m.allianceRed.teams.includes(team.id) || m.allianceBlue.teams.includes(team.id))
+      );
+
+      // Điểm từng trận của riêng đội đó
+      const matchScores = teamMatches.map(m =>
+        m.allianceRed.teams.includes(team.id)
+          ? m.allianceRed.score.finalScore
+          : m.allianceBlue.score.finalScore
+      );
+
+      // Sắp xếp điểm từng trận từ cao xuống thấp để dễ nhìn Top 4
+      const sortedScores = [...matchScores].sort((a, b) => b - a);
+      const padded = [...sortedScores, 0, 0, 0, 0, 0]; // đảm bảo đủ 5 phần tử
+      const [m1, m2, m3, m4, m5] = padded.slice(0, 5);
+
+      const top4Total = sortedScores.slice(0, 4).reduce((a, b) => a + b, 0);
+      const highest = sortedScores[0] || 0;
+
+      return {
+        'Hạng': index + 1,
+        'STT': team.stt,
+        'Tên đội': team.name,
+        'Trường': team.school,
+        'Số trận': matchScores.length,
+        'Trận 1': m1,
+        'Trận 2': m2,
+        'Trận 3': m3,
+        'Trận 4': m4,
+        'Trận 5': m5,
+        'Tổng điểm (Top 4)': top4Total,
+        'Điểm cao nhất': highest,
+        'Điểm sinh học': team.bioPointsTotal,
+      };
+    });
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Bang xep hang');
