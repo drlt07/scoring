@@ -50,6 +50,7 @@ export interface AllianceScore {
 export interface Alliance {
   teams: string[];
   score: AllianceScore;
+  teamScores?: Record<string, number>;
 }
 
 export interface Match {

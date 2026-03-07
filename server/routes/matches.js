@@ -565,8 +565,16 @@ function bestSplit(four, canBeAlliance, pairCount, alliancePairCount, pairKey) {
   if (!best) return null;
 
   return {
-    allianceRed: { teams: best.red, score: { ...INITIAL_SCORE } },
-    allianceBlue: { teams: best.blue, score: { ...INITIAL_SCORE } },
+    allianceRed: {
+      teams: best.red,
+      score: { ...INITIAL_SCORE },
+      teamScores: best.red.reduce((acc, tid) => ({ ...acc, [tid]: 0 }), {}),
+    },
+    allianceBlue: {
+      teams: best.blue,
+      score: { ...INITIAL_SCORE },
+      teamScores: best.blue.reduce((acc, tid) => ({ ...acc, [tid]: 0 }), {}),
+    },
     status: 'UPCOMING',
   };
 }
@@ -785,8 +793,11 @@ router.get('/export-schedule-excel', async (req, res) => {
       'Trận': '#' + m.matchNumber,
       'Thời gian': (m.startTime && m.endTime) ? `${m.startTime} – ${m.endTime}` : '-',
       'Sân': m.field ? 'Sân ' + m.field : '-',
-      'Liên minh Đỏ': m.allianceRed.teams.map(toName).join(' & '),
-      'Liên minh Xanh': m.allianceBlue.teams.map(toName).join(' & '),
+      'Đỏ 1': toName(m.allianceRed.teams[0]),
+      'Đỏ 2': toName(m.allianceRed.teams[1]),
+      'vs': 'vs',
+      'Xanh 1': toName(m.allianceBlue.teams[0]),
+      'Xanh 2': toName(m.allianceBlue.teams[1]),
       'Trạng thái': statusLabel(m.status),
     }));
     const ws1 = XLSX.utils.json_to_sheet(sheet1Data);
@@ -915,10 +926,12 @@ router.post('/manual-add', async (req, res) => {
       allianceRed: {
         teams: allianceRedTeams,
         score: { ...INITIAL_SCORE },
+        teamScores: allianceRedTeams.reduce((acc, tid) => ({ ...acc, [tid]: 0 }), {}),
       },
       allianceBlue: {
         teams: allianceBlueTeams,
         score: { ...INITIAL_SCORE },
+        teamScores: allianceBlueTeams.reduce((acc, tid) => ({ ...acc, [tid]: 0 }), {}),
       },
     };
 
@@ -1089,6 +1102,14 @@ router.put('/:id', async (req, res) => {
 
     const newAllianceRed = allianceRed || current.allianceRed;
     const newAllianceBlue = allianceBlue || current.allianceBlue;
+
+    // Đảm bảo luôn có teamScores để tránh lỗi, nếu cũ chưa có thì init theo teams hiện tại
+    if (!newAllianceRed.teamScores) {
+      newAllianceRed.teamScores = newAllianceRed.teams.reduce((acc, tid) => ({ ...acc, [tid]: newAllianceRed.score.finalScore }), {});
+    }
+    if (!newAllianceBlue.teamScores) {
+      newAllianceBlue.teamScores = newAllianceBlue.teams.reduce((acc, tid) => ({ ...acc, [tid]: newAllianceBlue.score.finalScore }), {});
+    }
 
     // ── Validate cục bộ trong trận ──
     const all4 = [...newAllianceRed.teams, ...newAllianceBlue.teams];

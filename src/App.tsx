@@ -16,6 +16,8 @@ import {
   ArrowRight, Users, Calendar, AlertCircle, Radio, Printer
 } from 'lucide-react';
 
+import AutomaticLeaderboard from './rest-of-list';
+
 // ── Constants ─────────────────────────────────
 const VIEW_ACCESS_CODE = 'fanroc2026';
 
@@ -37,6 +39,10 @@ const App: React.FC = () => {
   });
   const [activeAdminTab, setActiveAdminTab] = useState<'DASHBOARD' | 'TEAMS' | 'MATCHES' | 'USERS'>('DASHBOARD');
   const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
+  const [selectedTeamForMatches, setSelectedTeamForMatches] = useState<Team | null>(null);
+  const [editingMatch, setEditingMatch] = useState<Match | null>(null);
+  const [matchEditError, setMatchEditError] = useState<string>('');
+  const [isSavingMatch, setIsSavingMatch] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
 
   const normalizeScore = useCallback((score?: Partial<AllianceScore>): AllianceScore => {
@@ -122,11 +128,14 @@ const App: React.FC = () => {
           (m.status === 'LOCKED' || m.status === 'PENDING') &&
           (m.allianceRed.teams.includes(team.id) || m.allianceBlue.teams.includes(team.id))
       );
-      const matchScores = teamMatches.map(m =>
-        m.allianceRed.teams.includes(team.id)
-          ? m.allianceRed.score.finalScore
-          : m.allianceBlue.score.finalScore
-      );
+      const matchScores = teamMatches.map(m => {
+        const alliance = m.allianceRed.teams.includes(team.id) ? m.allianceRed : m.allianceBlue;
+        // Ưu tiên lấy từ teamScores nếu có, nếu không fallback về finalScore của liên minh
+        if (alliance.teamScores && alliance.teamScores[team.id] !== undefined) {
+          return alliance.teamScores[team.id];
+        }
+        return alliance.score.finalScore;
+      });
       const bioPointsTotal = teamMatches.reduce(
         (acc, m) =>
           acc +
@@ -165,11 +174,14 @@ const App: React.FC = () => {
       );
 
       // Điểm từng trận của riêng đội đó
-      const matchScores = teamMatches.map(m =>
-        m.allianceRed.teams.includes(team.id)
-          ? m.allianceRed.score.finalScore
-          : m.allianceBlue.score.finalScore
-      );
+      const matchScores = teamMatches.map(m => {
+        const alliance = m.allianceRed.teams.includes(team.id) ? m.allianceRed : m.allianceBlue;
+        // Ưu tiên lấy từ teamScores nếu có, nếu không fallback về finalScore của liên minh
+        if (alliance.teamScores && alliance.teamScores[team.id] !== undefined) {
+          return alliance.teamScores[team.id];
+        }
+        return alliance.score.finalScore;
+      });
 
       // Sắp xếp điểm từng trận từ cao xuống thấp để dễ nhìn Top 4
       const sortedScores = [...matchScores].sort((a, b) => b - a);
@@ -213,6 +225,121 @@ const App: React.FC = () => {
   const getTeamName = (id: string) => {
     const t = teams.find(t => t.id === id);
     return t ? t.name : '';
+  };
+
+  const getTeamMatches = (teamId: string | number) => {
+    return matches.filter(m =>
+      m.allianceRed.teams.includes(String(teamId)) ||
+      m.allianceBlue.teams.includes(String(teamId))
+    );
+  };
+
+  // ── Match Admin Helpers ─────────────────────
+  const handleToggleLock = async (m: Match) => {
+    const newStatus = m.status === 'LOCKED' ? 'PENDING' : 'LOCKED';
+    try {
+      await api.updateMatch(m.id, { status: newStatus, allianceRed: m.allianceRed, allianceBlue: m.allianceBlue });
+    } catch (err: any) { alert(err.message); }
+  };
+
+  const openMatchEditor = (m: Match) => {
+    setEditingMatch(m);
+    setMatchEditError('');
+  };
+
+  const handleChangeAllianceTeam = (color: 'RED' | 'BLUE', index: number, teamId: string) => {
+    if (!editingMatch) return;
+    setEditingMatch(prev => {
+      if (!prev) return prev;
+      const alliance = color === 'RED' ? prev.allianceRed : prev.allianceBlue;
+      const updatedTeams = [...alliance.teams];
+      updatedTeams[index] = teamId;
+      const updatedAlliance = { ...alliance, teams: updatedTeams };
+      return {
+        ...prev,
+        allianceRed: color === 'RED' ? updatedAlliance : prev.allianceRed,
+        allianceBlue: color === 'BLUE' ? updatedAlliance : prev.allianceBlue,
+      };
+    });
+  };
+
+  const handleSwapAlliances = () => {
+    if (!editingMatch) return;
+    setEditingMatch(prev => prev ? ({
+      ...prev,
+      allianceRed: prev.allianceBlue,
+      allianceBlue: prev.allianceRed,
+    }) : prev);
+  };
+
+  const handleSaveMatchEdit = async () => {
+    if (!editingMatch) return;
+    setIsSavingMatch(true);
+    setMatchEditError('');
+    try {
+      await api.updateMatch(editingMatch.id, {
+        status: editingMatch.status,
+        allianceRed: editingMatch.allianceRed,
+        allianceBlue: editingMatch.allianceBlue,
+      });
+      setEditingMatch(null);
+    } catch (err: any) {
+      setMatchEditError(err.message || 'Không lưu được thay đổi trận đấu.');
+    } finally {
+      setIsSavingMatch(false);
+    }
+  };
+
+  const handleDeleteMatch = async () => {
+    if (!editingMatch) return;
+    if (!window.confirm(`Bạn chắc chắn muốn xóa TRẬN #${editingMatch.matchNumber}?`)) return;
+    setIsSavingMatch(true);
+    setMatchEditError('');
+    try {
+      await api.deleteMatch(editingMatch.id);
+      setEditingMatch(null);
+    } catch (err: any) {
+      setMatchEditError(err.message || 'Không xóa được trận này.');
+    } finally {
+      setIsSavingMatch(false);
+    }
+  };
+
+  const handleEditTeamScoreDirectly = async (m: Match, teamId: string) => {
+    const isRed = m.allianceRed.teams.includes(teamId);
+    const alliance = isRed ? m.allianceRed : m.allianceBlue;
+    const currentScore = alliance.teamScores?.[teamId] ?? alliance.score.finalScore;
+
+    const teamName = getTeamName(teamId);
+    const newScoreStr = window.prompt(`Nhập điểm mới cho đội [${teamName}] trong TRẬN #${m.matchNumber}:`, String(currentScore));
+
+    if (newScoreStr === null) return;
+
+    const newScore = parseFloat(newScoreStr.replace(',', '.'));
+    if (isNaN(newScore)) {
+      alert("Vui lòng nhập một con số hợp lệ!");
+      return;
+    }
+
+    try {
+      const updatedAlliance = { ...alliance };
+      if (!updatedAlliance.teamScores) {
+        // Fallback init teamScores nếu chưa có
+        updatedAlliance.teamScores = updatedAlliance.teams.reduce((acc, tid) => ({
+          ...acc,
+          [tid]: updatedAlliance.score.finalScore
+        }), {});
+      }
+      updatedAlliance.teamScores = { ...updatedAlliance.teamScores, [teamId]: newScore };
+
+      await api.updateMatch(m.id, {
+        status: m.status,
+        allianceRed: isRed ? updatedAlliance : m.allianceRed,
+        allianceBlue: !isRed ? updatedAlliance : m.allianceBlue,
+      });
+    } catch (err: any) {
+      alert("Lỗi khi cập nhật điểm: " + err.message);
+    }
   };
 
   // ════════════════════════════════════════════
@@ -324,9 +451,6 @@ const App: React.FC = () => {
     const [newTeam, setNewTeam] = useState({ code: '', name: '', school: '' });
     const [editingTeam, setEditingTeam] = useState<Team | null>(null);
     const [newUser, setNewUser] = useState({ name: '', email: '', password: '', assignedField: 1 });
-    const [editingMatch, setEditingMatch] = useState<Match | null>(null);
-    const [matchEditError, setMatchEditError] = useState<string>('');
-    const [isSavingMatch, setIsSavingMatch] = useState(false);
     const [newManualMatch, setNewManualMatch] = useState<{ red1: string; red2: string; blue1: string; blue2: string }>({
       red1: '',
       red2: '',
@@ -420,78 +544,6 @@ const App: React.FC = () => {
       finally { setIsSyncing(false); }
     };
 
-    // ── Lock / Unlock match ─────────────────────
-    const handleToggleLock = async (m: Match) => {
-      const newStatus = m.status === 'LOCKED' ? 'PENDING' : 'LOCKED';
-      try {
-        await api.updateMatch(m.id, { status: newStatus, allianceRed: m.allianceRed, allianceBlue: m.allianceBlue });
-      } catch (err: any) { alert(err.message); }
-    };
-
-    const openMatchEditor = (m: Match) => {
-      setEditingMatch(m);
-      setMatchEditError('');
-    };
-
-    const handleChangeAllianceTeam = (color: 'RED' | 'BLUE', index: number, teamId: string) => {
-      if (!editingMatch) return;
-      setEditingMatch(prev => {
-        if (!prev) return prev;
-        const alliance = color === 'RED' ? prev.allianceRed : prev.allianceBlue;
-        const updatedTeams = [...alliance.teams];
-        updatedTeams[index] = teamId;
-        const updatedAlliance = { ...alliance, teams: updatedTeams };
-        return {
-          ...prev,
-          allianceRed: color === 'RED' ? updatedAlliance : prev.allianceRed,
-          allianceBlue: color === 'BLUE' ? updatedAlliance : prev.allianceBlue,
-        };
-      });
-    };
-
-    const handleSwapAlliances = () => {
-      if (!editingMatch) return;
-      setEditingMatch(prev => prev ? ({
-        ...prev,
-        allianceRed: prev.allianceBlue,
-        allianceBlue: prev.allianceRed,
-      }) : prev);
-    };
-
-    const handleSaveMatchEdit = async () => {
-      if (!editingMatch) return;
-      setIsSavingMatch(true);
-      setMatchEditError('');
-      try {
-        await api.updateMatch(editingMatch.id, {
-          status: editingMatch.status,
-          allianceRed: editingMatch.allianceRed,
-          allianceBlue: editingMatch.allianceBlue,
-        });
-        setEditingMatch(null);
-        // loadMatches sẽ được gọi qua socket 'matches:update'
-      } catch (err: any) {
-        setMatchEditError(err.message || 'Không lưu được thay đổi trận đấu.');
-      } finally {
-        setIsSavingMatch(false);
-      }
-    };
-
-    const handleDeleteMatch = async () => {
-      if (!editingMatch) return;
-      if (!window.confirm(`Bạn chắc chắn muốn xóa TRẬN #${editingMatch.matchNumber}?`)) return;
-      setIsSavingMatch(true);
-      setMatchEditError('');
-      try {
-        await api.deleteMatch(editingMatch.id);
-        setEditingMatch(null);
-      } catch (err: any) {
-        setMatchEditError(err.message || 'Không xóa được trận này.');
-      } finally {
-        setIsSavingMatch(false);
-      }
-    };
-
     const handleAddManualMatch = async () => {
       const { red1, red2, blue1, blue2 } = newManualMatch;
       if (!red1 || !red2 || !blue1 || !blue2) {
@@ -575,11 +627,18 @@ const App: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {leaderboard.map((t, idx) => (
-                      <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="px-8 py-6 font-black text-slate-300 italic">#{idx + 1}</td>
-                        <td className="px-8 py-6"><p className="font-black text-slate-800">{t.name}</p><p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">{t.school}</p></td>
+                      <tr key={t.id} className="hover:bg-blue-50/50 transition-colors cursor-pointer group" onClick={() => setSelectedTeamForMatches(t)}>
+                        <td className="px-8 py-6 font-black italic text-lg">
+                          <span className={`${idx === 0 ? 'text-yellow-500' : idx === 1 ? 'text-slate-400' : idx === 2 ? 'text-orange-400' : 'text-blue-600'}`}>
+                            #{idx + 1}
+                          </span>
+                        </td>
+                        <td className="px-8 py-6">
+                          <p className="font-black text-blue-600 group-hover:text-blue-700">{t.name}</p>
+                          <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">{t.school}</p>
+                        </td>
                         <td className="px-8 py-6 text-center font-bold text-slate-500">{t.matchesPlayed}</td>
-                        <td className="px-8 py-6 text-right font-black text-blue-600 text-xl tracking-tighter">{t.totalPoints}</td>
+                        <td className="px-8 py-6 text-right font-black text-blue-600 text-xl tracking-tighter">{Math.round(t.totalPoints * 10) / 10}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -758,8 +817,16 @@ const App: React.FC = () => {
                           <td className="px-6 py-4 font-black text-slate-700 text-center whitespace-nowrap">#{m.matchNumber}</td>
                           <td className="px-6 py-4 font-mono text-slate-600 text-center">{m.startTime} – {m.endTime}</td>
                           <td className="px-6 py-4 font-black text-blue-600 text-center">Sân {m.field}</td>
-                          <td className="px-6 py-4 text-red-600 font-bold text-center">{m.allianceRed.teams.map(id => getTeamName(id)).join(' & ')}</td>
-                          <td className="px-6 py-4 text-blue-600 font-bold text-center">{m.allianceBlue.teams.map(id => getTeamName(id)).join(' & ')}</td>
+                          <td className="px-6 py-4 text-center whitespace-nowrap">
+                            <span className="text-red-600 font-bold">{getTeamName(m.allianceRed.teams[0])}</span>
+                            <span className="mx-2 text-red-600 font-black">&</span>
+                            <span className="text-red-600 font-bold">{getTeamName(m.allianceRed.teams[1])}</span>
+                          </td>
+                          <td className="px-6 py-4 text-center whitespace-nowrap">
+                            <span className="text-blue-600 font-bold">{getTeamName(m.allianceBlue.teams[0])}</span>
+                            <span className="mx-2 text-red-600 font-black">&</span>
+                            <span className="text-blue-600 font-bold">{getTeamName(m.allianceBlue.teams[1])}</span>
+                          </td>
                           <td className="px-6 py-4 text-center">
                             <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${m.status === 'LOCKED' ? 'bg-emerald-50 text-emerald-600' : m.status === 'PENDING' ? 'bg-orange-50 text-orange-600' : m.status === 'SCORING' ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-400'}`}>
                               {m.status === 'LOCKED' ? 'Đã khóa' : m.status === 'PENDING' ? 'Chờ duyệt' : m.status === 'SCORING' ? 'Đang chấm' : 'Chờ thi'}
@@ -781,186 +848,120 @@ const App: React.FC = () => {
             )}
 
             {/* Manual add match */}
-            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm">
-              <h4 className="text-sm font-black uppercase tracking-[0.25em] text-slate-500 mb-4">Thêm trận mới (BTC)</h4>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="flex flex-col gap-2">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-500">Liên minh Đỏ</p>
-                  <div className="flex gap-2">
-                    <select
-                      value={newManualMatch.red1}
-                      onChange={e => setNewManualMatch({ ...newManualMatch, red1: e.target.value })}
-                      className="flex-1 p-3 rounded-2xl border bg-slate-50 text-sm"
-                    >
-                      <option value="">-- Chọn đội 1 --</option>
-                      {teams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={newManualMatch.red2}
-                      onChange={e => setNewManualMatch({ ...newManualMatch, red2: e.target.value })}
-                      className="flex-1 p-3 rounded-2xl border bg-slate-50 text-sm"
-                    >
-                      <option value="">-- Chọn đội 2 --</option>
-                      {teams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
-                      ))}
-                    </select>
+            <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm max-w-full overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center gap-2 mb-6">
+                <div className="w-1 h-5 bg-emerald-500 rounded-full"></div>
+                <h4 className="text-sm font-bold uppercase tracking-wider text-slate-600">
+                  Thêm trận mới (BTC)
+                </h4>
+              </div>
+
+              <div className="space-y-6">
+                {/* Grid chính: Chia 2 cột Đỏ/Xanh trên màn hình lớn */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  
+                  {/* Liên minh Đỏ */}
+                  <div className="p-4 rounded-2xl bg-red-50/50 border border-red-100">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-red-500 mb-3 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                      Liên minh Đỏ
+                    </p>
+                    {/* Grid phụ: Chia 2 cột cho Đội 1 và Đội 2 */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        value={newManualMatch.red1}
+                        onChange={e => setNewManualMatch({ ...newManualMatch, red1: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-red-200 transition-all"
+                      >
+                        <option value="">-- Đội 1 --</option>
+                        {teams.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={newManualMatch.red2}
+                        onChange={e => setNewManualMatch({ ...newManualMatch, red2: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-red-200 transition-all"
+                      >
+                        <option value="">-- Đội 2 --</option>
+                        {teams.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Liên minh Xanh */}
+                  <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500 mb-3 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                      Liên minh Xanh
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        value={newManualMatch.blue1}
+                        onChange={e => setNewManualMatch({ ...newManualMatch, blue1: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                      >
+                        <option value="">-- Đội 1 --</option>
+                        {teams.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={newManualMatch.blue2}
+                        onChange={e => setNewManualMatch({ ...newManualMatch, blue2: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-blue-200 transition-all"
+                      >
+                        <option value="">-- Đội 2 --</option>
+                        {teams.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500">Liên minh Xanh</p>
-                  <div className="flex gap-2">
-                    <select
-                      value={newManualMatch.blue1}
-                      onChange={e => setNewManualMatch({ ...newManualMatch, blue1: e.target.value })}
-                      className="flex-1 p-3 rounded-2xl border bg-slate-50 text-sm"
-                    >
-                      <option value="">-- Chọn đội 1 --</option>
-                      {teams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={newManualMatch.blue2}
-                      onChange={e => setNewManualMatch({ ...newManualMatch, blue2: e.target.value })}
-                      className="flex-1 p-3 rounded-2xl border bg-slate-50 text-sm"
-                    >
-                      <option value="">-- Chọn đội 2 --</option>
-                      {teams.map(t => (
-                        <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Thời gian & phút / trận</p>
-                  <div className="flex gap-2">
-                    <input
-                      type="time"
-                      value={manualStartTime}
-                      onChange={e => setManualStartTime(e.target.value)}
-                      className="flex-1 p-3 rounded-2xl border bg-slate-50 text-sm"
-                    />
-                    <input
-                      type="number"
-                      min={1}
-                      value={manualDuration}
-                      onChange={e => setManualDuration(Math.max(1, Number(e.target.value) || 1))}
-                      className="w-24 p-3 rounded-2xl border bg-slate-50 text-sm text-center"
-                    />
+
+                {/* Thời gian */}
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 mb-3">
+                    Thiết lập thời gian
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    <div className="flex-1 min-w-[140px]">
+                      <input
+                        type="time"
+                        value={manualStartTime}
+                        onChange={e => setManualStartTime(e.target.value)}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:ring-2 focus:ring-emerald-200"
+                      />
+                    </div>
+                    <div className="w-24">
+                      <input
+                        type="number"
+                        min={1}
+                        value={manualDuration}
+                        onChange={e => setManualDuration(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-white text-sm text-center outline-none focus:ring-2 focus:ring-emerald-200"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
-              <div className="mt-4 flex justify-end">
+
+              {/* Button */}
+              <div className="mt-6 flex justify-end">
                 <button
                   type="button"
                   onClick={handleAddManualMatch}
                   disabled={isSavingMatch || teams.length === 0 || matches.length === 0}
-                  className="px-6 py-3 rounded-2xl bg-emerald-600 text-white text-[11px] font-black uppercase tracking-[0.2em] shadow-md hover:bg-emerald-700 disabled:opacity-50"
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-emerald-600 text-white text-[11px] font-black uppercase tracking-[0.2em] hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
                 >
-                  + Thêm trận ở cuối lịch
+                  + Thêm trận cuối lịch
                 </button>
               </div>
             </div>
-
-            {/* Match editor overlay */}
-            {editingMatch && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-                <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl w-full max-w-3xl p-8 relative">
-                  <button
-                    type="button"
-                    onClick={() => { setEditingMatch(null); setMatchEditError(''); }}
-                    className="absolute top-4 right-4 text-slate-300 hover:text-slate-500 text-sm font-black"
-                  >
-                    ✕
-                  </button>
-                  <h3 className="text-xl font-black uppercase tracking-tighter text-slate-900 mb-4">
-                    Chỉnh sửa trận #{editingMatch.matchNumber} – Sân {editingMatch.field}
-                  </h3>
-                  <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.25em] mb-6">
-          
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500">Liên minh ĐỎ</span>
-                        <span className="text-[10px] font-mono text-slate-400">
-                          {editingMatch.startTime} – {editingMatch.endTime}
-                        </span>
-                      </div>
-                      {editingMatch.allianceRed.teams.map((tid, idx) => (
-                        <select
-                          key={idx}
-                          value={tid}
-                          onChange={e => handleChangeAllianceTeam('RED', idx, e.target.value)}
-                          className="w-full p-3 rounded-2xl border bg-red-50/60 text-sm"
-                        >
-                          {teams.map(t => (
-                            <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
-                          ))}
-                        </select>
-                      ))}
-                    </div>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-500">Liên minh XANH</span>
-                        <button
-                          type="button"
-                          onClick={handleSwapAlliances}
-                          className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-slate-900"
-                        >
-                          Hoán đổi Đỏ ↔ Xanh
-                        </button>
-                      </div>
-                      {editingMatch.allianceBlue.teams.map((tid, idx) => (
-                        <select
-                          key={idx}
-                          value={tid}
-                          onChange={e => handleChangeAllianceTeam('BLUE', idx, e.target.value)}
-                          className="w-full p-3 rounded-2xl border bg-blue-50/60 text-sm"
-                        >
-                          {teams.map(t => (
-                            <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
-                          ))}
-                        </select>
-                      ))}
-                    </div>
-                  </div>
-                  {matchEditError && (
-                    <div className="mt-4 text-xs text-red-600 bg-red-50 border border-red-100 rounded-2xl p-3 whitespace-pre-line">
-                      {matchEditError}
-                    </div>
-                  )}
-                  <div className="mt-6 flex justify-between gap-3">
-                    <button
-                      type="button"
-                      onClick={handleDeleteMatch}
-                      disabled={isSavingMatch}
-                      className="px-5 py-3 rounded-2xl bg-red-50 text-red-600 text-[11px] font-black uppercase tracking-[0.2em] hover:bg-red-100 disabled:opacity-50"
-                    >
-                      Xóa trận này
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setEditingMatch(null); setMatchEditError(''); }}
-                      className="px-5 py-3 rounded-2xl bg-slate-100 text-slate-600 text-[11px] font-black uppercase tracking-[0.2em]"
-                    >
-                      Hủy
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleSaveMatchEdit}
-                      disabled={isSavingMatch}
-                      className="px-6 py-3 rounded-2xl bg-blue-600 text-white text-[11px] font-black uppercase tracking-[0.2em] shadow-md hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      Lưu thay đổi
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -972,7 +973,7 @@ const App: React.FC = () => {
   // ════════════════════════════════════════════
   const ViewerView = () => {
     const top3 = leaderboard.slice(0, 3);
-    const others = leaderboard.slice(3, 100);
+    const others = leaderboard.slice(0, 100);
 
     return (
       <div className="space-y-12 animate-in fade-in duration-700 max-w-6xl mx-auto">
@@ -994,7 +995,7 @@ const App: React.FC = () => {
             <p className="text-2xl font-black text-slate-900 tracking-tighter uppercase mt-6">{top3[1]?.name || '...'}</p>
             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-2">{top3[1]?.school || 'N/A'}</p>
             <div className="mt-6 pt-6 border-t border-slate-50">
-              <p className="text-4xl font-black text-slate-800 tracking-tighter">{top3[1]?.totalPoints || 0}</p>
+              <p className="text-4xl font-black text-slate-800 tracking-tighter">{top3[1].totalPoints?.toFixed(1) ?? 0}</p>
               <p className="text-[9px] font-black text-slate-400 uppercase mt-1">Total Score</p>
             </div>
           </div>
@@ -1004,7 +1005,7 @@ const App: React.FC = () => {
             <p className="text-3xl font-black text-slate-900 tracking-tighter uppercase mt-10">{top3[0]?.name || '...'}</p>
             <p className="text-blue-600 text-xs font-bold uppercase tracking-[0.2em] mt-2">{top3[0]?.school || 'N/A'}</p>
             <div className="mt-8 pt-8 border-t border-slate-50">
-              <p className="text-7xl font-black text-blue-600 tracking-tighter">{top3[0]?.totalPoints || 0}</p>
+              <p className="text-7xl font-black text-blue-600 tracking-tighter">{top3[0]?.totalPoints?.toFixed(1) ?? 0}</p>
               <p className="text-[10px] font-black text-slate-400 uppercase mt-2 tracking-widest italic">Competition King</p>
             </div>
           </div>
@@ -1014,14 +1015,21 @@ const App: React.FC = () => {
             <p className="text-xl font-black text-slate-900 tracking-tighter uppercase mt-6">{top3[2]?.name || '...'}</p>
             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-2">{top3[2]?.school || 'N/A'}</p>
             <div className="mt-6 pt-6 border-t border-slate-50">
-              <p className="text-4xl font-black text-slate-800 tracking-tighter">{top3[2]?.totalPoints || 0}</p>
+              <p className="text-4xl font-black text-slate-800 tracking-tighter">{top3[2]?.totalPoints?.toFixed(1) ?? 0}</p>
               <p className="text-[9px] font-black text-slate-400 uppercase mt-1">Total Score</p>
             </div>
           </div>
         </div>
 
         {/* Rest of list */}
-        <div className="bg-white rounded-[3.5rem] overflow-hidden border border-slate-200 shadow-xl">
+        <AutomaticLeaderboard
+          others={others}
+          leaderboard={leaderboard}
+          isAdmin={activePortal === 'ADMIN'}
+          onTeamClick={(id) => setSelectedTeamForMatches(teams.find(t => t.id === id) || null)}
+        />
+
+        {/* <div className="bg-white rounded-[3.5rem] overflow-hidden border border-slate-200 shadow-xl">
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-50">
@@ -1030,7 +1038,7 @@ const App: React.FC = () => {
               <tbody className="divide-y divide-slate-50">
                 {others.map((t, idx) => (
                   <tr key={t.id} className="animate-row hover:bg-slate-50 transition-colors group">
-                    <td className="px-12 py-8 font-black text-slate-200 italic text-2xl group-hover:text-blue-600 transition-colors">#{idx + 4}</td>
+                    <td className="px-12 py-8 font-black text-slate-200 italic text-2xl group-hover:text-blue-600 transition-colors">#{idx + 1}</td>
                     <td className="px-12 py-8">
                       <p className="text-xl font-black text-slate-800 uppercase tracking-tight leading-none mb-1">{t.name}</p>
                       <p className="text-[10px] font-bold text-slate-400 tracking-widest uppercase">{t.school}</p>
@@ -1043,6 +1051,231 @@ const App: React.FC = () => {
             </table>
             {leaderboard.length === 0 && <p className="text-center py-40 text-slate-300 italic font-medium uppercase tracking-[0.2em]">Đang chờ kết quả từ các sân thi đấu...</p>}
           </div>
+        </div> */}
+      </div>
+    );
+  };
+
+  const handleSelectMatch = (m: Match) => setSelectedMatch(normalizeMatch(m));
+
+  const updateAllianceScore = <K extends keyof AllianceScore>(
+    color: 'RED' | 'BLUE',
+    field: K,
+    value: AllianceScore[K]
+  ) => {
+    if (!selectedMatch) return;
+    const alliance = color === 'RED' ? selectedMatch.allianceRed : selectedMatch.allianceBlue;
+    const draftRedScore = color === 'RED'
+      ? { ...selectedMatch.allianceRed.score, [field]: value }
+      : selectedMatch.allianceRed.score;
+    const draftBlueScore = color === 'BLUE'
+      ? { ...selectedMatch.allianceBlue.score, [field]: value }
+      : selectedMatch.allianceBlue.score;
+
+    const redTotalBalls = draftRedScore.yellowBalls + draftRedScore.whiteBalls;
+    const blueTotalBalls = draftBlueScore.yellowBalls + draftBlueScore.whiteBalls;
+    const updatedRedScore = {
+      ...draftRedScore,
+      ownCylinderBalls: redTotalBalls,
+      opponentCylinderBalls: blueTotalBalls,
+    };
+    const updatedBlueScore = {
+      ...draftBlueScore,
+      ownCylinderBalls: blueTotalBalls,
+      opponentCylinderBalls: redTotalBalls,
+    };
+
+    const calculated = calculateMatchScores(updatedRedScore, updatedBlueScore);
+
+    // Khi cập nhật điểm liên minh, mặc định cập nhật điểm của tất cả các đội trong liên minh đó theo điểm mới
+    const newAllianceRed = { ...selectedMatch.allianceRed, score: calculated.red };
+    const newAllianceBlue = { ...selectedMatch.allianceBlue, score: calculated.blue };
+
+    if (color === 'RED') {
+      newAllianceRed.teamScores = newAllianceRed.teams.reduce((acc, tid) => ({ ...acc, [tid]: calculated.red.finalScore }), {});
+    } else {
+      newAllianceBlue.teamScores = newAllianceBlue.teams.reduce((acc, tid) => ({ ...acc, [tid]: calculated.blue.finalScore }), {});
+    }
+
+    const newMatch = {
+      ...selectedMatch,
+      allianceRed: newAllianceRed,
+      allianceBlue: newAllianceBlue,
+      status: 'SCORING' as const,
+    };
+    setSelectedMatch(newMatch);
+    // Also update in local list
+    setMatches(prev => prev.map(m => m.id === newMatch.id ? newMatch : m));
+  };
+
+  const updateTeamScore = (color: 'RED' | 'BLUE', teamId: string, score: number) => {
+    if (!selectedMatch) return;
+    const alliance = color === 'RED' ? selectedMatch.allianceRed : selectedMatch.allianceBlue;
+    const newTeamScores = { ...(alliance.teamScores || {}), [teamId]: score };
+
+    const newMatch = {
+      ...selectedMatch,
+      allianceRed: color === 'RED' ? { ...selectedMatch.allianceRed, teamScores: newTeamScores } : selectedMatch.allianceRed,
+      allianceBlue: color === 'BLUE' ? { ...selectedMatch.allianceBlue, teamScores: newTeamScores } : selectedMatch.allianceBlue,
+      status: 'SCORING' as const,
+    };
+    setSelectedMatch(newMatch);
+    setMatches(prev => prev.map(m => m.id === newMatch.id ? newMatch : m));
+  };
+
+  const submitScore = async () => {
+    if (!selectedMatch) return;
+    const final = { ...selectedMatch, status: 'PENDING' as const };
+    try {
+      await api.updateMatch(final.id, { status: final.status, allianceRed: final.allianceRed, allianceBlue: final.allianceBlue });
+      setSelectedMatch(null);
+      alert('Gửi điểm thành công cho BTC!');
+    } catch (err: any) {
+      alert('Lỗi gửi điểm: ' + err.message);
+    }
+  };
+
+  // ── Scoring form component ──────────────────
+  const ScoringForm = () => {
+    if (!selectedMatch) return null;
+
+    const renderScoreColumn = (color: 'RED' | 'BLUE') => {
+      const alliance = color === 'RED' ? selectedMatch.allianceRed : selectedMatch.allianceBlue;
+      const c = color === 'RED' ? 'red' : 'blue';
+      return (
+        <div className={`flex-1 space-y-4 p-6 rounded-[3rem] ${color === 'RED' ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'} border-2`}>
+          <div className={`p-5 rounded-3xl bg-${c}-600 text-white text-center shadow-lg`}>
+            <h3 className="font-black uppercase text-xl tracking-tighter italic">LIÊN MINH {color === 'RED' ? 'ĐỎ' : 'XANH'}</h3>
+            <p className="text-[10px] opacity-75 font-bold uppercase tracking-widest">{alliance.teams.map(tid => getTeamName(tid)).join(' & ')}</p>
+          </div>
+
+          {/* Balls */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-3">Bóng Vàng (3đ)</p>
+              <div className="flex items-center gap-3">
+                <button onClick={() => updateAllianceScore(color, 'yellowBalls', Math.max(0, alliance.score.yellowBalls - 1))} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">-</button>
+                <span className="flex-1 text-center font-black text-3xl text-slate-900">{alliance.score.yellowBalls}</span>
+                <button onClick={() => updateAllianceScore(color, 'yellowBalls', alliance.score.yellowBalls + 1)} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">+</button>
+              </div>
+            </div>
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+              <p className="text-[10px] font-black text-slate-400 uppercase mb-3">Bóng Trắng (1đ)</p>
+              <div className="flex items-center gap-3">
+                <button onClick={() => updateAllianceScore(color, 'whiteBalls', Math.max(0, alliance.score.whiteBalls - 1))} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">-</button>
+                <span className="flex-1 text-center font-black text-3xl text-slate-900">{alliance.score.whiteBalls}</span>
+                <button onClick={() => updateAllianceScore(color, 'whiteBalls', alliance.score.whiteBalls + 1)} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">+</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Barrier + Cylinders */}
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 space-y-4 shadow-sm">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-black uppercase tracking-tight text-slate-500">Đẩy rào cản? (+20)</span>
+              <input
+                type="checkbox"
+                checked={alliance.score.pushedBarrier}
+                onChange={e => updateAllianceScore(color, 'pushedBarrier', e.target.checked)}
+                className="w-8 h-8 accent-emerald-500 rounded-xl cursor-pointer"
+              />
+            </div>
+            <div className="pt-4 border-t border-slate-50">
+              <label className="text-[9px] font-black text-slate-400 block mb-2 uppercase text-center">Tổng bóng trụ liên minh</label>
+              <div className="w-full p-4 bg-slate-50 border-none rounded-2xl text-center font-black text-2xl text-slate-900">
+                {alliance.score.yellowBalls + alliance.score.whiteBalls}
+              </div>
+            </div>
+          </div>
+
+          {/* End Game */}
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 space-y-4 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase text-center tracking-[0.2em]">End Game Position</p>
+            {[1, 2].map(num => (
+              <div key={num}>
+                <p className="text-[9px] font-bold text-slate-400 mb-2 text-center">Robot {num}</p>
+                <div className="flex gap-2">
+                  {(['NONE', 'PARTIAL', 'FULL'] as RobotEndGameState[]).map(s => (
+                    <button key={s} onClick={() => updateAllianceScore(color, `robot${num}EndGame` as any, s)}
+                      className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black border transition-all ${
+                        alliance.score[`robot${num}EndGame` as keyof AllianceScore] === s
+                          ? `bg-${c}-600 text-white border-${c}-600 shadow-md`
+                          : 'bg-slate-50 text-slate-400 border-slate-100'
+                      }`}>
+                      {s === 'NONE' ? 'Không' : s === 'PARTIAL' ? 'Partial' : 'Full'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Penalties & Cards */}
+          <div className="bg-slate-50 p-5 rounded-3xl space-y-4 border border-slate-100">
+            <div className="flex justify-between items-center text-[10px] uppercase font-black text-slate-500">
+              <span>Penalty (-5đ)</span>
+              <div className="flex items-center gap-3">
+                <button onClick={() => updateAllianceScore(color, 'penalties', Math.max(0, alliance.score.penalties - 1))} className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 font-black">-</button>
+                <span className="text-slate-900 w-6 text-center text-xl">{alliance.score.penalties}</span>
+                <button onClick={() => updateAllianceScore(color, 'penalties', alliance.score.penalties + 1)} className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 font-black">+</button>
+              </div>
+            </div>
+            <div className="flex justify-between items-center pt-3 border-t border-slate-200 text-orange-600 font-black text-[10px] uppercase">
+              <span>THẺ VÀNG (-10đ)</span>
+              <input type="checkbox" checked={alliance.score.yellowCard} onChange={e => updateAllianceScore(color, 'yellowCard', e.target.checked)} className="w-8 h-8 accent-orange-500 rounded-lg" />
+            </div>
+            <div className="flex justify-between items-center pt-3 border-t border-slate-200 text-red-600 font-black text-[10px] uppercase">
+              <span>THẺ ĐỎ (0đ toàn trận)</span>
+              <input type="checkbox" checked={alliance.score.redCards} onChange={e => updateAllianceScore(color, 'redCards', e.target.checked)} className="w-8 h-8 accent-red-600 rounded-lg" />
+            </div>
+          </div>
+
+          {/* Individual Team Scores (ADJUSTMENT) */}
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 space-y-4 shadow-sm">
+            <p className="text-[10px] font-black text-slate-400 uppercase text-center tracking-[0.2em]">Điểm riêng từng đội (Tùy chỉnh)</p>
+            {alliance.teams.map(tid => {
+              const currentVal = alliance.teamScores?.[tid] ?? alliance.score.finalScore;
+              return (
+                <div key={tid} className="flex items-center justify-between gap-4 p-3 bg-slate-50 rounded-2xl">
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black text-slate-900 uppercase leading-tight">{getTeamName(tid)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={currentVal}
+                      onChange={e => updateTeamScore(color, tid, parseFloat(e.target.value) || 0)}
+                      className="w-32 p-2 px-3 rounded-xl border border-slate-200 text-center font-black text-xl bg-white shadow-sm appearance-none"
+                      style={{ MozAppearance: 'textfield' }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Final Score */}
+          <div className={`p-6 rounded-[2.5rem] bg-white border-4 border-${c}-500 text-center shadow-xl`}>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Điểm Tạm Tính</p>
+            <p className="text-6xl font-black text-slate-900 tracking-tighter">{alliance.score.finalScore}</p>
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <div className="max-w-5xl mx-auto space-y-8 pb-20 animate-in fade-in">
+        <div className="flex items-center justify-between sticky top-4 bg-white/80 backdrop-blur-md py-4 px-6 rounded-3xl z-40 border border-slate-200 shadow-xl">
+          <button onClick={() => setSelectedMatch(null)} className="text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600">&larr; Quay lại</button>
+          <h2 className="text-2xl font-black italic tracking-tighter uppercase text-slate-900">CHẤM ĐIỂM TRẬN #{selectedMatch.matchNumber} <span className="text-blue-600">SÂN {selectedMatch.field}</span></h2>
+          <button onClick={submitScore} className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3.5 rounded-2xl font-black text-[11px] uppercase shadow-lg transition-all active:scale-95 flex items-center gap-2">
+            Xác nhận gửi <CheckCircle2 size={18} />
+          </button>
+        </div>
+        <div className="flex flex-col lg:flex-row gap-8">
+          {renderScoreColumn('RED')}
+          {renderScoreColumn('BLUE')}
         </div>
       </div>
     );
@@ -1057,175 +1290,8 @@ const App: React.FC = () => {
       return matches.filter(m => m.field === currentUser?.assignedField && m.status !== 'LOCKED');
     }, [matches, currentUser, role]);
 
-    const handleSelectMatch = (m: Match) => setSelectedMatch(normalizeMatch(m));
-
-    const updateAllianceScore = <K extends keyof AllianceScore>(
-      color: 'RED' | 'BLUE',
-      field: K,
-      value: AllianceScore[K]
-    ) => {
-      if (!selectedMatch) return;
-      const draftRedScore = color === 'RED'
-        ? { ...selectedMatch.allianceRed.score, [field]: value }
-        : selectedMatch.allianceRed.score;
-      const draftBlueScore = color === 'BLUE'
-        ? { ...selectedMatch.allianceBlue.score, [field]: value }
-        : selectedMatch.allianceBlue.score;
-
-      const redTotalBalls = draftRedScore.yellowBalls + draftRedScore.whiteBalls;
-      const blueTotalBalls = draftBlueScore.yellowBalls + draftBlueScore.whiteBalls;
-      const updatedRedScore = {
-        ...draftRedScore,
-        ownCylinderBalls: redTotalBalls,
-        opponentCylinderBalls: blueTotalBalls,
-      };
-      const updatedBlueScore = {
-        ...draftBlueScore,
-        ownCylinderBalls: blueTotalBalls,
-        opponentCylinderBalls: redTotalBalls,
-      };
-
-      const calculated = calculateMatchScores(updatedRedScore, updatedBlueScore);
-      const newMatch = {
-        ...selectedMatch,
-        allianceRed: { ...selectedMatch.allianceRed, score: calculated.red },
-        allianceBlue: { ...selectedMatch.allianceBlue, score: calculated.blue },
-        status: 'SCORING' as const,
-      };
-      setSelectedMatch(newMatch);
-      // Also update in local list
-      setMatches(prev => prev.map(m => m.id === newMatch.id ? newMatch : m));
-    };
-
-    const submit = async () => {
-      if (!selectedMatch) return;
-      const final = { ...selectedMatch, status: 'PENDING' as const };
-      try {
-        await api.updateMatch(final.id, { status: final.status, allianceRed: final.allianceRed, allianceBlue: final.allianceBlue });
-        setSelectedMatch(null);
-        alert('Gửi điểm thành công cho BTC!');
-      } catch (err: any) {
-        alert('Lỗi gửi điểm: ' + err.message);
-      }
-    };
-
-    // ── Scoring form ────────────────────────────
     if (selectedMatch) {
-      const renderScoreColumn = (color: 'RED' | 'BLUE') => {
-        const alliance = color === 'RED' ? selectedMatch.allianceRed : selectedMatch.allianceBlue;
-        const c = color === 'RED' ? 'red' : 'blue';
-        return (
-          <div className={`flex-1 space-y-4 p-6 rounded-[3rem] ${color === 'RED' ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'} border-2`}>
-            <div className={`p-5 rounded-3xl bg-${c}-600 text-white text-center shadow-lg`}>
-              <h3 className="font-black uppercase text-xl tracking-tighter italic">LIÊN MINH {color === 'RED' ? 'ĐỎ' : 'XANH'}</h3>
-              <p className="text-[10px] opacity-75 font-bold uppercase tracking-widest">{alliance.teams.map(tid => getTeamName(tid)).join(' & ')}</p>
-            </div>
-
-            {/* Balls */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-3">Bóng Vàng (3đ)</p>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => updateAllianceScore(color, 'yellowBalls', Math.max(0, alliance.score.yellowBalls - 1))} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">-</button>
-                  <span className="flex-1 text-center font-black text-3xl text-slate-900">{alliance.score.yellowBalls}</span>
-                  <button onClick={() => updateAllianceScore(color, 'yellowBalls', alliance.score.yellowBalls + 1)} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">+</button>
-                </div>
-              </div>
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                <p className="text-[10px] font-black text-slate-400 uppercase mb-3">Bóng Trắng (1đ)</p>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => updateAllianceScore(color, 'whiteBalls', Math.max(0, alliance.score.whiteBalls - 1))} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">-</button>
-                  <span className="flex-1 text-center font-black text-3xl text-slate-900">{alliance.score.whiteBalls}</span>
-                  <button onClick={() => updateAllianceScore(color, 'whiteBalls', alliance.score.whiteBalls + 1)} className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 font-black text-2xl">+</button>
-                </div>
-              </div>
-            </div>
-
-            {/* Barrier + Cylinders */}
-            <div className="bg-white p-5 rounded-3xl border border-slate-100 space-y-4 shadow-sm">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-black uppercase tracking-tight text-slate-500">Đẩy rào cản? (+20)</span>
-                <input
-                  type="checkbox"
-                  checked={alliance.score.pushedBarrier}
-                  onChange={e => updateAllianceScore(color, 'pushedBarrier', e.target.checked)}
-                  className="w-8 h-8 accent-emerald-500 rounded-xl cursor-pointer"
-                />
-              </div>
-              <div className="pt-4 border-t border-slate-50">
-                <label className="text-[9px] font-black text-slate-400 block mb-2 uppercase text-center">Tổng bóng trụ liên minh</label>
-                <div className="w-full p-4 bg-slate-50 border-none rounded-2xl text-center font-black text-2xl text-slate-900">
-                  {alliance.score.yellowBalls + alliance.score.whiteBalls}
-                </div>
-              </div>
-            </div>
-
-            {/* End Game */}
-            <div className="bg-white p-5 rounded-3xl border border-slate-100 space-y-4 shadow-sm">
-              <p className="text-[10px] font-black text-slate-400 uppercase text-center tracking-[0.2em]">End Game Position</p>
-              {[1, 2].map(num => (
-                <div key={num}>
-                  <p className="text-[9px] font-bold text-slate-400 mb-2 text-center">Robot {num}</p>
-                  <div className="flex gap-2">
-                    {(['NONE', 'PARTIAL', 'FULL'] as RobotEndGameState[]).map(s => (
-                      <button key={s} onClick={() => updateAllianceScore(color, `robot${num}EndGame` as any, s)}
-                        className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black border transition-all ${
-                          alliance.score[`robot${num}EndGame` as keyof AllianceScore] === s
-                            ? `bg-${c}-600 text-white border-${c}-600 shadow-md`
-                            : 'bg-slate-50 text-slate-400 border-slate-100'
-                        }`}>
-                        {s === 'NONE' ? 'Không' : s === 'PARTIAL' ? 'Partial' : 'Full'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Penalties & Cards */}
-            <div className="bg-slate-50 p-5 rounded-3xl space-y-4 border border-slate-100">
-              <div className="flex justify-between items-center text-[10px] uppercase font-black text-slate-500">
-                <span>Penalty (-5đ)</span>
-                <div className="flex items-center gap-3">
-                  <button onClick={() => updateAllianceScore(color, 'penalties', Math.max(0, alliance.score.penalties - 1))} className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 font-black">-</button>
-                  <span className="text-slate-900 w-6 text-center text-xl">{alliance.score.penalties}</span>
-                  <button onClick={() => updateAllianceScore(color, 'penalties', alliance.score.penalties + 1)} className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 font-black">+</button>
-                </div>
-              </div>
-              <div className="flex justify-between items-center pt-3 border-t border-slate-200 text-orange-600 font-black text-[10px] uppercase">
-                <span>THẺ VÀNG (-10đ)</span>
-                <input type="checkbox" checked={alliance.score.yellowCard} onChange={e => updateAllianceScore(color, 'yellowCard', e.target.checked)} className="w-8 h-8 accent-orange-500 rounded-lg" />
-              </div>
-              <div className="flex justify-between items-center pt-3 border-t border-slate-200 text-red-600 font-black text-[10px] uppercase">
-                <span>THẺ ĐỎ (0đ toàn trận)</span>
-                <input type="checkbox" checked={alliance.score.redCards} onChange={e => updateAllianceScore(color, 'redCards', e.target.checked)} className="w-8 h-8 accent-red-600 rounded-lg" />
-              </div>
-            </div>
-
-            {/* Final Score */}
-            <div className={`p-6 rounded-[2.5rem] bg-white border-4 border-${c}-500 text-center shadow-xl`}>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Điểm Tạm Tính</p>
-              <p className="text-6xl font-black text-slate-900 tracking-tighter">{alliance.score.finalScore}</p>
-            </div>
-          </div>
-        );
-      };
-
-      return (
-        <div className="max-w-5xl mx-auto space-y-8 pb-20 animate-in fade-in">
-          <div className="flex items-center justify-between sticky top-4 bg-white/80 backdrop-blur-md py-4 px-6 rounded-3xl z-40 border border-slate-200 shadow-xl">
-            <button onClick={() => setSelectedMatch(null)} className="text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600">&larr; Quay lại</button>
-            <h2 className="text-2xl font-black italic tracking-tighter uppercase text-slate-900">CHẤM ĐIỂM TRẬN #{selectedMatch.matchNumber} <span className="text-blue-600">SÂN {selectedMatch.field}</span></h2>
-            <button onClick={submit} className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3.5 rounded-2xl font-black text-[11px] uppercase shadow-lg transition-all active:scale-95 flex items-center gap-2">
-              Xác nhận gửi <CheckCircle2 size={18} />
-            </button>
-          </div>
-          <div className="flex flex-col lg:flex-row gap-8">
-            {renderScoreColumn('RED')}
-            {renderScoreColumn('BLUE')}
-          </div>
-        </div>
-      );
+      return <ScoringForm />;
     }
 
     // ── Match list for judge ────────────────────
@@ -1305,10 +1371,220 @@ const App: React.FC = () => {
           </header>
 
           <main className="max-w-[1400px] mx-auto px-10 py-12 pb-40">
-            {activePortal === 'ADMIN' && <AdminView />}
-            {activePortal === 'JUDGE' && <JudgePortal />}
-            {activePortal === 'VIEWER' && <ViewerView />}
+            {activePortal === 'ADMIN' && (
+              <div key="admin-portal">
+                <AdminView />
+              </div>
+            )}
+            {activePortal === 'JUDGE' && (
+              <div key="judge-portal">
+                <JudgePortal />
+              </div>
+            )}
+            {activePortal === 'VIEWER' && (
+              <div key="viewer-portal">
+                <ViewerView />
+              </div>
+            )}
           </main>
+
+          {/* Global Modals (Admin only features usually, but visibility is handled by activePortal check if needed) */}
+          {editingMatch && activePortal === 'ADMIN' && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl w-full max-w-3xl p-8 relative">
+                <button
+                  type="button"
+                  onClick={() => { setEditingMatch(null); setMatchEditError(''); }}
+                  className="absolute top-4 right-4 text-slate-300 hover:text-slate-500 text-sm font-black"
+                >
+                  ✕
+                </button>
+                <h3 className="text-xl font-black uppercase tracking-tighter text-slate-900 mb-4">
+                  Chỉnh sửa trận #{editingMatch.matchNumber} – Sân {editingMatch.field}
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-[0.25em] text-red-500">Liên minh ĐỎ</span>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {editingMatch.startTime} – {editingMatch.endTime}
+                      </span>
+                    </div>
+                    {editingMatch.allianceRed.teams.map((tid, idx) => (
+                      <select
+                        key={idx}
+                        value={tid}
+                        onChange={e => handleChangeAllianceTeam('RED', idx, e.target.value)}
+                        className="w-full max-w-xs p-2 rounded-xl border bg-red-50/60 text-sm"
+                      >
+                        {teams.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
+                        ))}
+                      </select>
+                    ))}
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-500">Liên minh XANH</span>
+                      <button
+                        type="button"
+                        onClick={handleSwapAlliances}
+                        className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 hover:text-slate-900"
+                      >
+                        Hoán đổi Đỏ ↔ Xanh
+                      </button>
+                    </div>
+                    {editingMatch.allianceBlue.teams.map((tid, idx) => (
+                      <select
+                        key={idx}
+                        value={tid}
+                        onChange={e => handleChangeAllianceTeam('BLUE', idx, e.target.value)}
+                        className="w-full max-w-xs p-2 rounded-xl border bg-blue-50/60 text-sm"
+                      >
+                        {teams.map(t => (
+                          <option key={t.id} value={t.id}>{t.name} – {t.school}</option>
+                        ))}
+                      </select>
+                    ))}
+                  </div>
+                </div>
+                {matchEditError && (
+                  <div className="mt-4 text-xs text-red-600 bg-red-50 border border-red-100 rounded-2xl p-3 whitespace-pre-line">
+                    {matchEditError}
+                  </div>
+                )}
+                <div className="mt-6 flex justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleDeleteMatch}
+                    disabled={isSavingMatch}
+                    className="px-5 py-3 rounded-2xl bg-red-50 text-red-600 text-[11px] font-black uppercase tracking-[0.2em] hover:bg-red-100 disabled:opacity-50"
+                  >
+                    Xóa trận này
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingMatch(null); setMatchEditError(''); }}
+                    className="px-5 py-3 rounded-2xl bg-slate-100 text-slate-600 text-[11px] font-black uppercase tracking-[0.2em]"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveMatchEdit}
+                    disabled={isSavingMatch}
+                    className="px-6 py-3 rounded-2xl bg-blue-600 text-white text-[11px] font-black uppercase tracking-[0.2em] shadow-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Lưu thay đổi
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {selectedTeamForMatches && (
+            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="bg-white rounded-[3rem] border border-slate-200 shadow-2xl w-full max-w-4xl p-8 relative max-h-[80vh] overflow-y-auto">
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamForMatches(null)}
+                  className="absolute top-4 right-4 text-slate-300 hover:text-slate-500 text-sm font-black"
+                >
+                  ✕
+                </button>
+                <div className="mb-6">
+                  <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-900 mb-2">
+                    Các trận đấu của đội: {selectedTeamForMatches.name}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-bold uppercase tracking-[0.25em]">
+                    {selectedTeamForMatches.school}
+                  </p>
+                </div>
+
+                {(() => {
+                  const teamMatches = getTeamMatches(selectedTeamForMatches.id);
+                  if (teamMatches.length === 0) {
+                    return (
+                      <div className="py-12 text-center">
+                        <p className="text-slate-300 font-black italic uppercase tracking-[0.2em]">Đội này chưa có trận đấu nào</p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-3">
+                      {teamMatches.map(m => {
+                        const isRedAlliance = m.allianceRed.teams.includes(String(selectedTeamForMatches.id));
+                        const allianceTeams = isRedAlliance ? m.allianceRed.teams : m.allianceBlue.teams;
+                        const opponentTeams = isRedAlliance ? m.allianceBlue.teams : m.allianceRed.teams;
+                        const allianceName = isRedAlliance ? 'Đỏ' : 'Xanh';
+
+                        return (
+                          <div
+                            key={m.id}
+                            className="w-full p-4 bg-white border border-slate-200 hover:border-blue-400 hover:shadow-md rounded-2xl transition-all group"
+                          >
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-3 mb-2">
+                                  <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded-full text-slate-600">Trận #{m.matchNumber}</span>
+                                  <span className={`text-[10px] font-black px-3 py-1 rounded-full ${isRedAlliance ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                                    Liên minh {allianceName}
+                                  </span>
+                                  <span className="text-[10px] font-black bg-slate-50 px-3 py-1 rounded-full text-slate-600">Sân {m.field}</span>
+                                </div>
+                                <div className="text-sm font-bold text-slate-700">
+                                  {allianceTeams.map(tid => getTeamName(tid)).join(' & ')}
+                                  <span className="text-slate-400 mx-2">vs</span>
+                                  {opponentTeams.map(tid => getTeamName(tid)).join(' & ')}
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono mt-1">
+                                  {m.startTime} – {m.endTime}
+                                  <span className="mx-2">•</span>
+                                  <span className={`font-bold ${m.status === 'LOCKED' ? 'text-emerald-600' : m.status === 'PENDING' ? 'text-orange-600' : m.status === 'SCORING' ? 'text-rose-600' : 'text-slate-400'}`}>
+                                    {m.status === 'LOCKED' ? 'Đã khóa' : m.status === 'PENDING' ? 'Chờ duyệt' : m.status === 'SCORING' ? 'Đang chấm' : 'Chờ thi'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[10px] text-slate-400 font-bold mb-2">Điểm Alliance</p>
+                                <div className="flex gap-2 mb-2 text-sm font-black justify-end">
+                                  <span className="text-red-600">{m.allianceRed.score?.finalScore || 0}</span>
+                                  <span className="text-slate-300">-</span>
+                                  <span className="text-blue-600">{m.allianceBlue.score?.finalScore || 0}</span>
+                                </div>
+                                {(() => {
+                                  const alliance = isRedAlliance ? m.allianceRed : m.allianceBlue;
+                                  const teamScore = alliance.teamScores?.[String(selectedTeamForMatches.id)] ?? alliance.score.finalScore;
+                                  if (teamScore !== alliance.score.finalScore) {
+                                    return (
+                                      <div className="mt-1">
+                                        <p className="text-[9px] text-emerald-600 font-black uppercase tracking-widest">Điểm riêng: {teamScore}</p>
+                                      </div>
+                                    );
+                                  }
+                                  return null;
+                                })()}
+                                {activePortal === 'ADMIN' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleEditTeamScoreDirectly(m, String(selectedTeamForMatches.id))}
+                                    className="px-3 py-1.5 bg-blue-600 text-white text-[10px] font-black rounded-lg hover:bg-blue-700 transition-all"
+                                  >
+                                    SỬA
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
