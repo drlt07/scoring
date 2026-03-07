@@ -54,9 +54,12 @@ export default function AutomaticLeaderboard({ others, leaderboard, isAdmin, onT
 
   useEffect(() => {
     if (isAutoScroll) {
-      // Cập nhật lại vị trí hiện tại của container trước khi bắt đầu để tránh bị nhảy (jump)
-      if (scrollRef.current) currentScrollPos.current = scrollRef.current.scrollTop;
-      
+      // Reset về vị trí 0 (rank 1) khi bắt đầu auto-scroll
+      if (scrollRef.current) {
+        currentScrollPos.current = 0;
+        scrollRef.current.scrollTop = 0;
+      }
+
       requestRef.current = requestAnimationFrame(animate);
     } else {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
@@ -117,12 +120,7 @@ export default function AutomaticLeaderboard({ others, leaderboard, isAdmin, onT
                   onClick={() => isAdmin && onTeamClick?.(t.id)}
                 >
                   <td className="px-8 py-6 font-black italic text-2xl">
-                    <span className={`
-                      ${idx === 0 ? 'text-yellow-500 drop-shadow-[0_0_8px_rgba(234,179,8,0.3)]' :
-                        idx === 1 ? 'text-slate-400' :
-                        idx === 2 ? 'text-orange-400' :
-                        'text-blue-600/40'}
-                    `}>
+                    <span className="text-slate-400">
                       #{idx + 1}
                     </span>
                   </td>

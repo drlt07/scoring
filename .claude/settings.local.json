@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(findstr :3000)",
+      "Bash(node server/index.js)",
+      "Bash(mysql -u root -p123456 -e \"SELECT User, Host FROM mysql.user;\")",
+      "Bash(python fix_podium.py)",
+      "Bash(python3 fix_podium.py)",
+      "Bash(grep -E \"\\\\.\\(png|jpg|svg\\)$\")",
+      "Bash(git checkout \"D:\\\\FanRoc-Scoring\\\\FanRoc-Scoring\\\\src\\\\App.tsx\")"
+    ]
+  }
+}

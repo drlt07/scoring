@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 
 import AutomaticLeaderboard from './rest-of-list';
+import logoFanroc from './logo.png';
+import logoRobot from './robot_logo.png';
 
 // ── Constants ─────────────────────────────────
 const VIEW_ACCESS_CODE = 'fanroc2026';
@@ -1349,22 +1351,23 @@ const App: React.FC = () => {
         <LoginView />
       ) : (
         <>
-          <header className="bg-white/80 backdrop-blur-xl border-b border-slate-200 sticky top-0 z-50 px-10 h-24 flex items-center justify-between print:hidden shadow-sm">
-            <div className="flex items-center gap-5">
-              <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg shadow-blue-200 transform rotate-3"><Trophy size={28} /></div>
+          <header className="bg-gradient-to-r from-blue-900 to-blue-800 sticky top-0 z-50 px-10 h-16 flex items-center justify-between print:hidden shadow-lg">
+            <div className="flex items-center gap-4">
+              <img src={logoFanroc} alt="FANROC" className="h-12 object-contain" />
               <div>
-                <h1 className="font-black text-3xl tracking-tighter text-slate-900 italic uppercase leading-none">FANROC <span className="text-blue-600">2026</span></h1>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.5em] mt-2">v2.6 Real-time</p>
+                <h1 className="font-black text-3xl tracking-tighter text-white italic uppercase leading-none">FANROC <span className="text-blue-300">2026</span></h1>
+                <p className="text-[10px] font-black text-blue-200 uppercase tracking-[0.3em] mt-2">v2.6 Real-time</p>
               </div>
             </div>
             <div className="flex items-center gap-6">
-              <div className="hidden lg:block text-right border-r border-slate-100 pr-6 mr-6">
-                <p className="text-[10px] font-black text-slate-900 uppercase tracking-widest leading-none">{currentUser?.name || 'KHÁN GIẢ'}</p>
-                <p className="text-[9px] font-black text-blue-600 uppercase tracking-[0.3em] mt-2">
+              <img src={logoRobot} alt="Robot" className="h-10 object-contain" />
+              <div className="hidden lg:block text-right border-r border-blue-700 pr-6 mr-6">
+                <p className="text-[10px] font-black text-white uppercase tracking-widest leading-none">{currentUser?.name || 'KHÁN GIẢ'}</p>
+                <p className="text-[9px] font-black text-blue-300 uppercase tracking-[0.3em] mt-2">
                   {activePortal === 'ADMIN' ? 'SUPER BTC' : activePortal === 'JUDGE' ? `GK SÂN ${currentUser?.assignedField}` : 'VIEWER'}
                 </p>
               </div>
-              <button onClick={handleLogout} className="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all active:scale-90 shadow-sm">
+              <button onClick={handleLogout} className="w-12 h-12 flex items-center justify-center bg-blue-800 border border-blue-700 text-blue-300 hover:text-white hover:bg-blue-700 rounded-2xl transition-all active:scale-90 shadow-sm">
                 <LogOut size={24} />
               </button>
             </div>
