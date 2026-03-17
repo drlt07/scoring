@@ -17,8 +17,8 @@ import {
 } from 'lucide-react';
 
 import AutomaticLeaderboard from './rest-of-list';
-import logoFanroc from './logo.png';
-import logoRobot from './robot_logo.png';
+import logoFanroc from "./assets/logo.png";
+import logoRobot from "./assets/robot_logo.png";
 
 // ── Constants ─────────────────────────────────
 const VIEW_ACCESS_CODE = 'fanroc2026';
@@ -46,6 +46,13 @@ const App: React.FC = () => {
   const [matchEditError, setMatchEditError] = useState<string>('');
   const [isSavingMatch, setIsSavingMatch] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  // ── Draw Modal State ──────────────────────────
+  const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
+  const [drawIcon, setDrawIcon] = useState('🎲');
+  const [drawTitle, setDrawTitle] = useState('Đang bốc thăm lịch thi đấu...');
+  const [drawStatus, setDrawStatus] = useState('Hệ thống đang xử lý');
+  const [drawTotalMatches, setDrawTotalMatches] = useState(0);
 
   const normalizeScore = useCallback((score?: Partial<AllianceScore>): AllianceScore => {
     const legacy = score as (Partial<AllianceScore> & { pushedBarrier?: boolean }) | undefined;
@@ -519,32 +526,61 @@ const App: React.FC = () => {
 
     // ── Generate Matches ────────────────────────
     const handleGenerateMatches = async () => {
-      if (teams.length < 4) { alert('Cần tối thiểu 4 đội để tạo lịch!'); return; }
-      try {
-        setIsSyncing(true);
-        const result = await api.generateMatches({
-          startTime: scheduleConfig.startTime,
-          matchDuration: scheduleConfig.matchDuration,
-          fields: scheduleConfig.fields,
-        });
-        loadMatches();
-        if (result && result.info) {
-          const { totalMatches, fieldsUsed, note } = result.info;
-          let msg = `✓ Đã tạo ${totalMatches} trận, sử dụng ${fieldsUsed} sân.`;
-          if (result.statistics) {
-            const s = result.statistics;
-            msg += `\n\nThống kê: ${s.teamsWith4} đội 4 trận, ${s.teamsWith5} đội 5 trận`;
-            if (s.matchDifference > 1) msg += `\n⚠️ Chênh lệch số trận: ${s.matchDifference}`;
-          }
-          if (result.warnings && result.warnings.length > 0) {
-            msg += '\n\nCảnh báo: ' + result.warnings.map((w: { message: string }) => w.message).join('; ');
-          }
-          if (note) msg += `\n\n${note}`;
-          alert(msg);
-        }
-      } catch (err: any) { alert(err.message); }
-      finally { setIsSyncing(false); }
-    };
+  if (teams.length < 4) {
+    alert('Cần tối thiểu 4 đội để tạo lịch!');
+    return;
+  }
+
+  try {
+    setIsSyncing(true);
+
+    // 🎲 MỞ MODAL
+    setIsDrawModalOpen(true);
+    setDrawIcon('🎲');
+    setDrawTitle('Đang bốc thăm lịch thi đấu...');
+    setDrawStatus('Hệ thống đang chọn ngẫu nhiên');
+
+    await new Promise(r => setTimeout(r, 2500));
+
+    // ⚙️ PROCESSING
+    setDrawIcon('⚙️');
+    setDrawTitle('Đang hoàn tất lịch thi đấu...');
+    setDrawStatus('Vui lòng chờ trong giây lát');
+
+    const result = await api.generateMatches({
+      startTime: scheduleConfig.startTime,
+      matchDuration: scheduleConfig.matchDuration,
+      fields: scheduleConfig.fields,
+    });
+
+    loadMatches();
+
+    await new Promise(r => setTimeout(r, 3000));
+
+    // ✅ SUCCESS
+    const total = result?.info?.totalMatches || 0;
+    setDrawTotalMatches(total);
+    setDrawIcon('✅');
+    setDrawTitle('Tạo lịch đấu thành công!');
+    setDrawStatus(`Đã tạo ${total} trận đấu`);
+
+    setTimeout(() => {
+      setIsDrawModalOpen(false);
+    }, 1800);
+
+  } catch (err: any) {
+    setDrawIcon('❌');
+    setDrawTitle('Có lỗi xảy ra');
+    setDrawStatus(err.message || 'Không thể tạo lịch');
+
+    setTimeout(() => {
+      setIsDrawModalOpen(false);
+    }, 2000);
+
+  } finally {
+    setIsSyncing(false);
+  }
+};
 
     const handleAddManualMatch = async () => {
       const { red1, red2, blue1, blue2 } = newManualMatch;
@@ -776,10 +812,10 @@ const App: React.FC = () => {
 
             {/* Match list */}
             {matches.length > 0 && (
-              <div className="bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-100 bg-slate-50">
+              <div className="bg-white rounded-[3rem] border-2 border-slate-300 shadow-lg overflow-hidden">
+                <div className="p-6 border-b-2 border-slate-200 bg-gradient-to-r from-slate-50 to-white">
                   <div className="flex items-center justify-between gap-4">
-                    <h4 className="text-lg font-black uppercase text-slate-700">Danh sách lịch thi đấu ({matches.length} trận)</h4>
+                    <h4 className="text-xl font-black uppercase text-slate-800 tracking-tight">Danh sách lịch thi đấu ({matches.length} trận)</h4>
                     <div className="flex items-center gap-3">
                       <div className="hidden md:flex items-center gap-2 text-[10px] text-slate-400 font-black uppercase tracking-[0.15em]">
                         <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
@@ -799,7 +835,7 @@ const App: React.FC = () => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b">
+                      <tr className="text-[10px] font-black uppercase tracking-widest text-slate-600 border-b-2 border-slate-300">
                         <th className="px-6 py-4">Trận</th>
                         <th className="px-6 py-4">Thời gian</th>
                         <th className="px-6 py-4">Sân</th>
@@ -819,15 +855,35 @@ const App: React.FC = () => {
                           <td className="px-6 py-4 font-black text-slate-700 text-center whitespace-nowrap">#{m.matchNumber}</td>
                           <td className="px-6 py-4 font-mono text-slate-600 text-center">{m.startTime} – {m.endTime}</td>
                           <td className="px-6 py-4 font-black text-blue-600 text-center">Sân {m.field}</td>
-                          <td className="px-6 py-4 text-center whitespace-nowrap">
-                            <span className="text-red-600 font-bold">{getTeamName(m.allianceRed.teams[0])}</span>
-                            <span className="mx-2 text-red-600 font-black">&</span>
-                            <span className="text-red-600 font-bold">{getTeamName(m.allianceRed.teams[1])}</span>
+                          <td className="px-6 py-4 font-black text-blue-600 text-center">
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-center text-center gap-x-2">
+                              
+                              <span className="text-red-600 font-bold truncate">
+                                {getTeamName(m.allianceRed.teams[0])}
+                              </span>
+
+                              <span className="text-slate-400 font-black">│</span>
+
+                              <span className="text-red-600 font-bold truncate">
+                                {getTeamName(m.allianceRed.teams[1])}
+                              </span>
+
+                            </div>
                           </td>
-                          <td className="px-6 py-4 text-center whitespace-nowrap">
-                            <span className="text-blue-600 font-bold">{getTeamName(m.allianceBlue.teams[0])}</span>
-                            <span className="mx-2 text-red-600 font-black">&</span>
-                            <span className="text-blue-600 font-bold">{getTeamName(m.allianceBlue.teams[1])}</span>
+                          <td className="px-6 py-4 font-black text-blue-600 text-center">
+                            <div className="grid grid-cols-[1fr_auto_1fr] items-center text-center gap-x-2">
+                              
+                              <span className="text-blue-600 font-bold truncate">
+                                {getTeamName(m.allianceBlue.teams[0])}
+                              </span>
+
+                              <span className="text-slate-400 font-black">│</span>
+
+                              <span className="text-blue-600 font-bold truncate">
+                                {getTeamName(m.allianceBlue.teams[1])}
+                              </span>
+
+                            </div>
                           </td>
                           <td className="px-6 py-4 text-center">
                             <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${m.status === 'LOCKED' ? 'bg-emerald-50 text-emerald-600' : m.status === 'PENDING' ? 'bg-orange-50 text-orange-600' : m.status === 'SCORING' ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-400'}`}>
@@ -1354,10 +1410,10 @@ const App: React.FC = () => {
           <header className="bg-gradient-to-r from-blue-900 to-blue-800 sticky top-0 z-50 px-10 h-16 flex items-center justify-between print:hidden shadow-lg">
             <div className="flex items-center gap-4">
               <img src={logoFanroc} alt="FANROC" className="h-12 object-contain" />
-              <div>
+              {/* <div>
                 <h1 className="font-black text-3xl tracking-tighter text-white italic uppercase leading-none">FANROC <span className="text-blue-300">2026</span></h1>
                 <p className="text-[10px] font-black text-blue-200 uppercase tracking-[0.3em] mt-2">v2.6 Real-time</p>
-              </div>
+              </div> */}
             </div>
             <div className="flex items-center gap-6">
               <img src={logoRobot} alt="Robot" className="h-10 object-contain" />
@@ -1590,7 +1646,34 @@ const App: React.FC = () => {
           )}
         </>
       )}
+      {/* 🔥 DRAW MODAL */}
+      {isDrawModalOpen && (
+  <div className="draw-overlay">
+    <div className={`draw-container ${drawIcon === '✅' ? 'draw-success' : ''}`}>
+
+      <div className={`draw-icon ${drawIcon === '🎲' ? 'dice-spin' : ''}`}>
+        {drawIcon}
+      </div>
+
+      <h2 className="draw-title">
+        {drawTitle}
+      </h2>
+
+      <p className="draw-status">
+        {drawStatus}
+      </p>
+
+      <div className="draw-loading">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+
     </div>
+  </div>
+  )}
+    </div>
+    
   );
 };
 
